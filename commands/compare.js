@@ -3,7 +3,7 @@
 
 const {
   SlashCommandBuilder, EmbedBuilder,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, MessageFlags,
 } = require('discord.js');
 const { getModels, fetchSchema } = require('../modelCache');
 const { checkCooldown }          = require('../rateLimiter');
@@ -146,7 +146,7 @@ module.exports = {
     if (wait) {
       return interaction.reply({
         content: `⏱️ Please wait **${wait}s** before using \`/compare\` again.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 

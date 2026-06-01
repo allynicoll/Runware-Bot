@@ -1,7 +1,7 @@
 // commands/changelog.js
 // /changelog — fetch and display the latest Runware platform changelog entries
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const { checkCooldown }   = require('../rateLimiter');
 const { userFacingError } = require('../utils/errors');
 const { fetchWithTimeout } = require('../utils/fetch');
@@ -51,7 +51,7 @@ module.exports = {
     if (wait) {
       return interaction.reply({
         content: `⏱️ Please wait **${wait}s** before using \`/changelog\` again.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -77,8 +77,9 @@ module.exports = {
       .setFooter({ text: 'Source: runware.ai/docs/changelog' });
 
     for (const entry of entries) {
-      const dateStr = entry.pubDate
-        ? new Date(entry.pubDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+      const parsedDate = entry.pubDate ? new Date(entry.pubDate) : null;
+      const dateStr = (parsedDate && !isNaN(parsedDate))
+        ? parsedDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
         : '';
 
       const value = [

@@ -1,7 +1,7 @@
 // index.js — Main bot entry point
 
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, REST, Routes, MessageFlags } = require('discord.js');
 const { getModels } = require('./modelCache');
 
 // Load commands
@@ -64,8 +64,8 @@ async function registerCommands() {
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-client.once('ready', async () => {
-  console.log(`\n✅ Logged in as ${client.user.tag}`);
+client.once('clientReady', async (c) => {
+  console.log(`\n✅ Logged in as ${c.user.tag}`);
   console.log(`   Serving guild: ${process.env.DISCORD_GUILD_ID}`);
 
   if (AI_COMMAND_ROLE_ID) {
@@ -105,7 +105,7 @@ client.on('interactionCreate', async interaction => {
     if (!hasRole) {
       return interaction.reply({
         content: '❌ You don\'t have permission to use this command.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
@@ -114,7 +114,7 @@ client.on('interactionCreate', async interaction => {
     await command.execute(interaction);
   } catch (error) {
     console.error(`[Error] Command /${interaction.commandName}:`, error);
-    const msg = { content: '❌ Something went wrong. Please try again.', ephemeral: true };
+    const msg = { content: '❌ Something went wrong. Please try again.', flags: MessageFlags.Ephemeral };
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply(msg).catch(() => {});
     } else {

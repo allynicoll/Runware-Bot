@@ -1,7 +1,7 @@
 // commands/info.js
 // /info [model-id] — show details and parameters for a specific model
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getModels, fetchSchema } = require('../modelCache');
 const { checkCooldown }      = require('../rateLimiter');
 const { userFacingError }    = require('../utils/errors');
@@ -59,7 +59,7 @@ module.exports = {
     if (wait) {
       return interaction.reply({
         content: `⏱️ Please wait **${wait}s** before using \`/info\` again.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 

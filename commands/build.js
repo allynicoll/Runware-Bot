@@ -1,7 +1,7 @@
 // commands/build.js
 // /build [model-id] [request] — AI-powered API call builder
 
-const { SlashCommandBuilder, EmbedBuilder, codeBlock } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, codeBlock, MessageFlags } = require('discord.js');
 const { getModels, fetchSchema } = require('../modelCache');
 const { checkCooldown }       = require('../rateLimiter');
 const { sanitizePromptInput } = require('../utils/sanitize');
@@ -75,7 +75,7 @@ module.exports = {
     if (wait) {
       return interaction.reply({
         content: `⏱️ Please wait **${wait}s** before using \`/build\` again.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -150,7 +150,7 @@ module.exports = {
         }
         chunk += line + '\n';
       }
-      if (chunk) await interaction.followUp(codeBlock('json', '// ...continued\n' + chunk));
+      if (chunk) await interaction.followUp(codeBlock('json', (isFirst ? '' : '// ...continued\n') + chunk));
     }
   },
 };

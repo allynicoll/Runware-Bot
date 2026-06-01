@@ -1,7 +1,7 @@
 // commands/pricing.js
 // /pricing [model] — show pricing info for a specific model from its schema
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getModels, fetchSchema } = require('../modelCache');
 const { checkCooldown }   = require('../rateLimiter');
 const { userFacingError } = require('../utils/errors');
@@ -21,7 +21,7 @@ module.exports = {
     if (wait) {
       return interaction.reply({
         content: `⏱️ Please wait **${wait}s** before using \`/pricing\` again.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 

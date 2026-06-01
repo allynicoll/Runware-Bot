@@ -1,7 +1,7 @@
 // commands/recommend.js
 // /recommend [use-case] — AI picks the best model(s) for what you want to make
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getModels }           = require('../modelCache');
 const { checkCooldown }       = require('../rateLimiter');
 const { sanitizePromptInput } = require('../utils/sanitize');
@@ -73,7 +73,7 @@ module.exports = {
     if (wait) {
       return interaction.reply({
         content: `⏱️ Please wait **${wait}s** before using \`/recommend\` again.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -98,6 +98,10 @@ module.exports = {
       const raw     = await callRunware(prompt);
       const cleaned = raw.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim();
       recommendations = JSON.parse(cleaned);
+      if (!Array.isArray(recommendations)) {
+        console.error('[recommend] AI returned non-array JSON:', typeof recommendations);
+        throw new Error('Unexpected response format');
+      }
     } catch (e) {
       console.error('[recommend] AI call / parse error:', e);
       return interaction.editReply(`❌ ${userFacingError(e)}`);
@@ -123,12 +127,12 @@ module.exports = {
       const status = model ? (statusEmoji[model.status] || '') : '';
 
       embed.addFields({
-        name: `${medals[i] || '▪️'} ${rec.bestFor}`,
+        name: `${medals[i] || '▪️'} ${rec.bestFor || 'Recommendation'}`,
         value: [
-          `${status} **${rec.name}** \`${rec.id}\``,
-          rec.reason,
+          `${status} **${rec.name || rec.id}** \`${rec.id}\``,
+          rec.reason || '',
           `> Use \`/info ${rec.id}\` for details or \`/build ${rec.id}\` to generate an API call.`,
-        ].join('\n'),
+        ].filter(Boolean).join('\n'),
         inline: false,
       });
     }

@@ -1,7 +1,7 @@
 // commands/search.js
 // /search — filter models by capability, creator, or status
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getModels }     = require('../modelCache');
 const { checkCooldown } = require('../rateLimiter');
 
@@ -45,7 +45,7 @@ module.exports = {
     if (wait) {
       return interaction.reply({
         content: `⏱️ Please wait **${wait}s** before searching again.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 

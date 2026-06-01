@@ -2,7 +2,7 @@
 // /new — show models added since the bot last checked
 // Also exports startNewModelWatcher() for automatic channel announcements
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getModels }     = require('../modelCache');
 const { checkCooldown } = require('../rateLimiter');
 const fs   = require('fs');
@@ -142,7 +142,7 @@ module.exports = {
     if (wait) {
       return interaction.reply({
         content: `⏱️ Please wait **${wait}s** before using \`/new\` again.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
