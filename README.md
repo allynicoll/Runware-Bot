@@ -14,6 +14,7 @@ A Discord bot for exploring the Runware model catalogue, understanding schemas, 
 | `/pricing [model]` | Pricing info and cost examples from the model's schema |
 | `/new` | Show models added or gone live since the last check |
 | `/changelog` | Display the latest Runware platform changelog entries |
+| `/learn [topic] [question]` | Explore official Runware docs or ask a question, answered by AI |
 
 ---
 
@@ -77,6 +78,22 @@ On first run, snapshots all current models to disk (`.model-snapshot.json`). On 
 ### `/changelog`
 
 Fetches the latest 3 entries from the Runware platform changelog RSS feed and displays them with dates and links.
+
+---
+
+### `/learn [topic] [question]`
+
+An AI-powered documentation assistant sourced directly from Runware's official docs. Runs in four modes:
+
+**No arguments** — displays a topic index grouped into three categories (Platform, SDKs & Integrations, Utilities) so you can see everything available at a glance. No AI call, no cooldown consumed.
+
+**`/learn topic:[name]`** — fetches the official documentation for that topic and generates a concise, Discord-formatted explanation with key concepts, a practical example, and a developer tip. 18 topics available.
+
+**`/learn question:[text]`** — ask anything in plain English. The bot first runs a fast routing call to identify the 1–3 most relevant topics, fetches those docs in parallel, then answers your question directly from the official content. No need to know which doc covers what.
+
+**`/learn topic:[name] question:[text]`** — combines both: your question is answered but scoped strictly to that topic's documentation, useful when you know roughly where the answer lives.
+
+Topics covered: Introduction, Authentication, Pricing, Rate Limits, Errors, Webhooks, Streaming, Task Polling, JavaScript SDK, Python SDK, ComfyUI, Vercel AI SDK, OpenAI Compatibility, Model Search, Model Upload, Account Management, Image Upload, Task Details.
 
 ---
 
@@ -194,8 +211,6 @@ pm2 startup    # follow the printed command to auto-start on reboot
 
 ### Current limitations
 
-- **No per-user rate limiting** — Any server member can trigger AI commands (`/build`, `/recommend`, `/compare`), which consume Runware inference credits. There are no cooldowns or per-user caps, so heavy or abusive use could drain your API balance.
-
 - **Schemas are not cached** — Every `/info`, `/build`, `/pricing`, and `/compare` call fetches the model schema fresh from Runware's CDN. Under concurrent use this means repeated outbound requests for the same schemas.
 
 - **Search results are truncated** — Discord embeds are capped at 25 fields. Very broad `/search` queries silently cut off at 20 results with no pagination.
@@ -204,28 +219,24 @@ pm2 startup    # follow the printed command to auto-start on reboot
 
 - **Watcher interval is hardcoded** — The 1-hour new-model check cycle is not configurable without editing the source.
 
-- **No input sanitisation beyond Discord** — Model IDs are resolved via fuzzy match against the cached catalogue but not otherwise validated before being sent to the Runware API.
-
 - **No error monitoring** — Failures are written to `console.error` only. There is no alerting, structured logging, or crash reporting.
+
+- **`/learn` doc cache is in-memory only** — The documentation cache resets on bot restart, so the first request for each topic after a restart incurs a CDN fetch. Under heavy use, popular topics are warm quickly.
 
 ### Potential improvements
 
-- **Per-user cooldowns** — An in-memory map (or Redis for persistence across restarts) on AI commands to prevent runaway credit consumption.
+- **Schema caching** — Cache model schema JSON with a TTL alongside the model catalogue to avoid redundant CDN hits on `/info`, `/build`, `/pricing`, and `/compare`.
 
-- **Schema caching** — Cache schema JSON with a TTL alongside the model catalogue to avoid redundant CDN hits.
-
-- **Paginated search** — Next/prev buttons for result sets that exceed the embed field limit.
+- **Paginated search** — Next/prev buttons for `/search` result sets that exceed the embed field limit.
 
 - **Configurable watcher interval** — Expose `WATCHER_INTERVAL_MINUTES` as an `.env` variable.
 
 - **Global command registration** — Switch from guild-scoped to global slash commands for multi-server deployments.
 
-- **Ephemeral error replies** — Make error responses ephemeral so they don't clutter shared channels.
-
-- **Security hardening** — Role-based restrictions on AI commands (e.g. require a specific role to use `/build`), command audit logging, and allowlist/denylist support for model IDs or users.
-
-- **Structured logging** — Replace `console.log` with a proper logger (e.g. `pino`) for easier filtering and monitoring.
+- **Structured logging** — Replace `console.log` with a proper logger (e.g. `pino`) for easier filtering and monitoring in production.
 
 - **Health check endpoint** — A lightweight HTTP server for uptime monitoring, useful with pm2 or container deployments.
 
 - **Extended feature detection** — Expand the schema feature-extraction in `modelCache.js` beyond audio to surface additional model capabilities automatically.
+
+- **`/learn` guide topics** — Extend the learning hub with Runware's hands-on guides (text-to-image, inpainting, ControlNet workflows, etc.) as additional selectable topics.

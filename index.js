@@ -13,6 +13,7 @@ const newCmd       = require('./commands/new');
 const changelogCmd = require('./commands/changelog');
 const pricingCmd   = require('./commands/pricing');
 const compareCmd   = require('./commands/compare');
+const learnCmd     = require('./commands/learn');
 const { startNewModelWatcher } = require('./commands/new');
 
 const commands = new Collection();
@@ -24,10 +25,11 @@ commands.set(newCmd.data.name,       newCmd);
 commands.set(changelogCmd.data.name, changelogCmd);
 commands.set(pricingCmd.data.name,   pricingCmd);
 commands.set(compareCmd.data.name,   compareCmd);
+commands.set(learnCmd.data.name,     learnCmd);
 
 // Commands that consume paid Runware inference credits.
 // These are gated behind AI_COMMAND_ROLE_ID when that env var is set.
-const AI_COMMANDS = new Set(['build', 'recommend', 'compare']);
+const AI_COMMANDS = new Set(['build', 'recommend', 'compare', 'learn']);
 const AI_COMMAND_ROLE_ID = process.env.AI_COMMAND_ROLE_ID || null;
 
 // ── Global error handlers ─────────────────────────────────────────────────────
@@ -49,7 +51,7 @@ async function registerCommands() {
   const rest = new REST().setToken(process.env.DISCORD_TOKEN);
   const commandData = [
     searchCmd, infoCmd, buildCmd, recommendCmd,
-    newCmd, changelogCmd, pricingCmd, compareCmd,
+    newCmd, changelogCmd, pricingCmd, compareCmd, learnCmd,
   ].map(c => c.data.toJSON());
 
   console.log('[Commands] Registering slash commands to guild...');

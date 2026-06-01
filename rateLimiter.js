@@ -11,6 +11,7 @@ const COOLDOWNS_MS = {
   build:     30_000,   // 30 s — paid AI inference
   recommend: 20_000,   // 20 s — paid AI inference
   compare:   30_000,   // 30 s — 2 schema fetches + paid AI inference
+  learn:     20_000,   // 20 s — doc fetch + paid AI inference (1–2 calls)
   search:     3_000,   // 3 s  — free, spam protection only
   info:       3_000,
   pricing:    5_000,

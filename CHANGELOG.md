@@ -5,6 +5,30 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.2.0] — /learn command
+
+### Added
+
+- **`/learn`** (`commands/learn.js`) — Interactive Runware API documentation assistant
+  with three modes:
+  - **No arguments** → displays a topic index embed grouped by category (no AI call,
+    no cooldown consumed).
+  - **`/learn topic:[name]`** → fetches the official doc for that topic and generates
+    a clear, Discord-formatted explanation with a concrete example and a developer tip.
+  - **`/learn question:[text]`** → uses a lightweight AI routing call to identify the
+    1–3 most relevant topics, fetches those docs, then answers the question directly
+    from the official documentation.
+  - **`/learn topic:[name] question:[text]`** → answers the question scoped to a
+    specific topic's documentation.
+  - 18 topics across three categories: Platform, SDKs & Integrations, Utilities.
+  - In-memory doc cache per topic with a 1-hour TTL to avoid repeated CDN hits.
+  - Safety cap of 40 000 characters on doc content sent to the AI.
+  - 20-second cooldown on AI-powered paths; the index view bypasses the cooldown.
+  - Added `learn` to `AI_COMMANDS` in `index.js` so it respects `AI_COMMAND_ROLE_ID`.
+  - Added `learn: 20_000` to `rateLimiter.js`.
+
+---
+
 ## [1.1.0] — Security hardening release
 
 ### Security
