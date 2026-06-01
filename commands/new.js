@@ -159,6 +159,7 @@ module.exports = {
     }
 
     const { brandNew, wentLive } = diffModels(oldSnap, models);
+    saveSnapshot(models); // advance snapshot so re-running /new doesn't repeat the same results
 
     if (!brandNew.length && !wentLive.length) {
       return interaction.editReply('✅ No new models or status changes since the last check. Check back later!');
