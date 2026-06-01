@@ -2,7 +2,8 @@
 // /search — filter models by capability, creator, or status
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getModels } = require('../modelCache');
+const { getModels }     = require('../modelCache');
+const { checkCooldown } = require('../rateLimiter');
 
 const CAPABILITY_CHOICES = [
   'text-to-image', 'image-to-image', 'text-to-video', 'image-to-video',
@@ -13,10 +14,10 @@ const CAPABILITY_CHOICES = [
 ].map(c => ({ name: c, value: c }));
 
 const STATUS_CHOICES = [
-  { name: 'Live', value: 'live' },
-  { name: 'API Only', value: 'api-only' },
-  { name: 'Coming Soon', value: 'coming-soon' },
-  { name: 'Deprecated', value: 'deprecated' },
+  { name: 'Live',         value: 'live'         },
+  { name: 'API Only',     value: 'api-only'     },
+  { name: 'Coming Soon',  value: 'coming-soon'  },
+  { name: 'Deprecated',   value: 'deprecated'   },
 ];
 
 module.exports = {
@@ -31,6 +32,7 @@ module.exports = {
     .addStringOption(opt =>
       opt.setName('creator')
         .setDescription('Filter by creator (e.g. "Black Forest Labs", "Google")')
+        .setMaxLength(100)
         .setRequired(false))
     .addStringOption(opt =>
       opt.setName('status')
@@ -39,18 +41,25 @@ module.exports = {
         .addChoices(...STATUS_CHOICES)),
 
   async execute(interaction) {
+    const wait = checkCooldown(interaction.user.id, 'search');
+    if (wait) {
+      return interaction.reply({
+        content: `⏱️ Please wait **${wait}s** before searching again.`,
+        ephemeral: true,
+      });
+    }
+
     await interaction.deferReply();
 
-    const capability = interaction.options.getString('capability');
+    const capability  = interaction.options.getString('capability');
     const creatorQuery = interaction.options.getString('creator')?.toLowerCase();
-    const status = interaction.options.getString('status');
-
-    const allModels = await getModels();
+    const status      = interaction.options.getString('status');
+    const allModels   = await getModels();
 
     const results = allModels.filter(m => {
-      if (capability && !m.capabilities?.includes(capability)) return false;
-      if (creatorQuery && !m.creator?.toLowerCase().includes(creatorQuery)) return false;
-      if (status && m.status !== status) return false;
+      if (capability   && !m.capabilities?.includes(capability))             return false;
+      if (creatorQuery && !m.creator?.toLowerCase().includes(creatorQuery))  return false;
+      if (status       && m.status !== status)                               return false;
       return true;
     });
 
@@ -72,9 +81,9 @@ module.exports = {
       .setFooter({ text: `${results.length} model${results.length === 1 ? '' : 's'} found • Use /info [id] for details • 🟢 Live  🔵 API Only  🟡 Coming Soon  🔴 Deprecated  ⚪ Unknown` });
 
     const filterParts = [];
-    if (capability) filterParts.push(`capability: \`${capability}\``);
+    if (capability)   filterParts.push(`capability: \`${capability}\``);
     if (creatorQuery) filterParts.push(`creator: \`${creatorQuery}\``);
-    if (status) filterParts.push(`status: \`${status}\``);
+    if (status)       filterParts.push(`status: \`${status}\``);
     if (filterParts.length) embed.setDescription(`Filters: ${filterParts.join(' · ')}`);
 
     const statusEmoji = { live: '🟢', 'api-only': '🔵', 'coming-soon': '🟡', deprecated: '🔴' };
@@ -83,7 +92,6 @@ module.exports = {
     for (const [creator, models] of Object.entries(grouped)) {
       if (fieldCount >= 20) break;
 
-      // Auto-chunk lines to stay under Discord's 1024-char field limit
       const allLines = models.map(m => {
         const emoji = statusEmoji[m.status] || '⚪';
         return emoji + ' **' + m.name + '** `' + m.id + '`';
@@ -110,5 +118,5 @@ module.exports = {
     }
 
     await interaction.editReply({ embeds: [embed] });
-  }
+  },
 };

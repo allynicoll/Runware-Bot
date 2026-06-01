@@ -2,15 +2,14 @@
 // /changelog — fetch and display the latest Runware platform changelog entries
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { checkCooldown }   = require('../rateLimiter');
+const { userFacingError } = require('../utils/errors');
+const { fetchWithTimeout } = require('../utils/fetch');
 
 const CHANGELOG_RSS = 'https://runware.ai/docs/changelog/rss.xml';
 
-/**
- * Fetch and parse the changelog RSS feed.
- * Returns an array of { title, date, link, description } objects.
- */
 async function fetchChangelog() {
-  const res = await fetch(CHANGELOG_RSS);
+  const res = await fetchWithTimeout(CHANGELOG_RSS, {}, 10_000);
   if (!res.ok) throw new Error(`Failed to fetch changelog RSS: ${res.status}`);
   const xml = await res.text();
 
@@ -24,16 +23,14 @@ async function fetchChangelog() {
     const title = (block.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/) ||
                    block.match(/<title>([\s\S]*?)<\/title>/))?.[1]?.trim() ?? 'Untitled';
 
-    const link  = (block.match(/<link>([\s\S]*?)<\/link>/))?.[1]?.trim() ?? '';
-
+    const link    = (block.match(/<link>([\s\S]*?)<\/link>/))?.[1]?.trim()    ?? '';
     const pubDate = (block.match(/<pubDate>([\s\S]*?)<\/pubDate>/))?.[1]?.trim() ?? '';
 
-    // Description may be CDATA-wrapped HTML — strip tags for plain text
     const rawDesc = (block.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) ||
                      block.match(/<description>([\s\S]*?)<\/description>/))?.[1] ?? '';
     const plainDesc = rawDesc
-      .replace(/<[^>]+>/g, ' ')   // strip HTML tags
-      .replace(/\s{2,}/g, ' ')    // collapse whitespace
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s{2,}/g, ' ')
       .trim()
       .slice(0, 300);
 
@@ -50,13 +47,22 @@ module.exports = {
     .setDescription('Show the latest Runware platform changelog entries'),
 
   async execute(interaction) {
+    const wait = checkCooldown(interaction.user.id, 'changelog');
+    if (wait) {
+      return interaction.reply({
+        content: `⏱️ Please wait **${wait}s** before using \`/changelog\` again.`,
+        ephemeral: true,
+      });
+    }
+
     await interaction.deferReply();
 
     let entries;
     try {
       entries = await fetchChangelog();
     } catch (e) {
-      return interaction.editReply(`❌ Could not fetch the changelog: ${e.message}`);
+      console.error('[changelog] Fetch error:', e);
+      return interaction.editReply(`❌ ${userFacingError(e)}`);
     }
 
     if (!entries.length) {

@@ -2,7 +2,12 @@
 // /recommend [use-case] — AI picks the best model(s) for what you want to make
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getModels } = require('../modelCache');
+const { getModels }           = require('../modelCache');
+const { checkCooldown }       = require('../rateLimiter');
+const { sanitizePromptInput } = require('../utils/sanitize');
+const { userFacingError }     = require('../utils/errors');
+const { fetchWithTimeout }    = require('../utils/fetch');
+const { inferenceModel }      = require('../config');
 
 const SYSTEM_PROMPT = `You are an expert on the Runware API model catalogue.
 Your job is to recommend the best Runware model(s) for a user's use case.
@@ -22,8 +27,8 @@ Rules:
 - Return ONLY a valid JSON array of these objects, no markdown fences, no explanation.
 - If nothing in the catalogue fits at all, return an empty array [].`;
 
-async function callClaude(prompt) {
-  const response = await fetch('https://api.runware.ai/v1', {
+async function callRunware(prompt) {
+  const response = await fetchWithTimeout('https://api.runware.ai/v1', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${process.env.RUNWARE_API_KEY}`,
@@ -32,22 +37,22 @@ async function callClaude(prompt) {
     body: JSON.stringify([{
       taskType: 'textInference',
       taskUUID: crypto.randomUUID(),
-      model: 'anthropic:claude@sonnet-4.6',
+      model: inferenceModel,
       messages: [{ role: 'user', content: prompt }],
-      settings: {
-        systemPrompt: SYSTEM_PROMPT,
-        maxTokens: 1024,
-      },
-    }])
-  });
+      settings: { systemPrompt: SYSTEM_PROMPT, maxTokens: 1024 },
+    }]),
+  }, 30_000);
 
   if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Runware API error ${response.status}: ${err}`);
+    console.error('[recommend] Runware API error:', response.status);
+    throw new Error('Runware API error');
   }
 
   const data = await response.json();
-  if (data?.errors?.length) throw new Error(data.errors[0].message || 'Unknown API error');
+  if (data?.errors?.length) {
+    console.error('[recommend] Runware API-level error:', data.errors[0]);
+    throw new Error('Runware API error');
+  }
   const text = data?.data?.[0]?.text;
   if (!text) throw new Error('No text in response from Runware');
   return text;
@@ -60,15 +65,23 @@ module.exports = {
     .addStringOption(opt =>
       opt.setName('usecase')
         .setDescription('What do you want to make? (e.g. "animate a photo of my dog")')
+        .setMaxLength(500)
         .setRequired(true)),
 
   async execute(interaction) {
+    const wait = checkCooldown(interaction.user.id, 'recommend');
+    if (wait) {
+      return interaction.reply({
+        content: `⏱️ Please wait **${wait}s** before using \`/recommend\` again.`,
+        ephemeral: true,
+      });
+    }
+
     await interaction.deferReply();
 
-    const useCase = interaction.options.getString('usecase');
+    const useCase  = sanitizePromptInput(interaction.options.getString('usecase'));
     const allModels = await getModels();
 
-    // Send a slim version of the catalogue to keep tokens low
     const catalogue = allModels
       .filter(m => m.status === 'live' || m.status === 'api-only')
       .map(m => ({
@@ -82,18 +95,21 @@ module.exports = {
     let recommendations;
     try {
       const prompt = `Model catalogue:\n${JSON.stringify(catalogue)}\n\nUser request: "${useCase}"\n\nRecommend the best model(s).`;
-      const raw = await callClaude(prompt);
+      const raw     = await callRunware(prompt);
       const cleaned = raw.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim();
       recommendations = JSON.parse(cleaned);
     } catch (e) {
-      return interaction.editReply(`❌ Failed to get recommendations: ${e.message}`);
+      console.error('[recommend] AI call / parse error:', e);
+      return interaction.editReply(`❌ ${userFacingError(e)}`);
     }
 
     if (!recommendations.length) {
-      return interaction.editReply(`😕 Couldn't find a model that fits *"${useCase}"*. Try rephrasing or use \`/search\` to browse manually.`);
+      return interaction.editReply(
+        `😕 Couldn't find a model that fits *"${useCase}"*. Try rephrasing or use \`/search\` to browse manually.`
+      );
     }
 
-    const medals = ['🥇', '🥈', '🥉'];
+    const medals      = ['🥇', '🥈', '🥉'];
     const statusEmoji = { live: '🟢', 'api-only': '🔵' };
 
     const embed = new EmbedBuilder()
@@ -102,7 +118,7 @@ module.exports = {
       .setDescription(`Use case: *"${useCase}"*`);
 
     for (let i = 0; i < recommendations.length; i++) {
-      const rec = recommendations[i];
+      const rec   = recommendations[i];
       const model = allModels.find(m => m.id === rec.id);
       const status = model ? (statusEmoji[model.status] || '') : '';
 
@@ -117,7 +133,7 @@ module.exports = {
       });
     }
 
-    embed.setFooter({ text: '🟢 Live  🔵 API Only  🟡 Coming Soon  🔴 Deprecated' });
+    embed.setFooter({ text: '🟢 Live  🔵 API Only' });
     await interaction.editReply({ embeds: [embed] });
-  }
+  },
 };

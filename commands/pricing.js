@@ -3,6 +3,8 @@
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getModels, fetchSchema } = require('../modelCache');
+const { checkCooldown }   = require('../rateLimiter');
+const { userFacingError } = require('../utils/errors');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -11,16 +13,24 @@ module.exports = {
     .addStringOption(opt =>
       opt.setName('model')
         .setDescription('Model ID or AIR ID (e.g. bfl-flux-1-schnell, runware:100@1)')
+        .setMaxLength(100)
         .setRequired(true)),
 
   async execute(interaction) {
+    const wait = checkCooldown(interaction.user.id, 'pricing');
+    if (wait) {
+      return interaction.reply({
+        content: `⏱️ Please wait **${wait}s** before using \`/pricing\` again.`,
+        ephemeral: true,
+      });
+    }
+
     await interaction.deferReply();
 
-    const query = interaction.options.getString('model').toLowerCase().trim();
+    const query     = interaction.options.getString('model').toLowerCase().trim();
     const allModels = await getModels();
 
-    // Match by id, air, or partial name
-    let model =
+    const model =
       allModels.find(m => m.id === query) ||
       allModels.find(m => m.air?.toLowerCase() === query) ||
       allModels.find(m => m.id.includes(query) || m.name.toLowerCase().includes(query));
@@ -31,15 +41,15 @@ module.exports = {
       );
     }
 
-    // Fetch schema for x-pricing data
     let schema;
     try {
       schema = await fetchSchema(model.schema);
     } catch (e) {
-      return interaction.editReply(`❌ Failed to fetch schema for \`${model.id}\`: ${e.message}`);
+      console.error('[pricing] Schema fetch error:', e);
+      return interaction.editReply(`❌ ${userFacingError(e)}`);
     }
 
-    const pricing = schema?.info?.['x-pricing'];
+    const pricing     = schema?.info?.['x-pricing'];
     const statusEmoji = { live: '🟢', 'api-only': '🔵', 'coming-soon': '🟡', deprecated: '🔴' };
 
     const embed = new EmbedBuilder()
@@ -60,30 +70,20 @@ module.exports = {
     if (!pricing) {
       embed.addFields({
         name: '💲 Pricing',
-        value: 'Pricing details are not available in the schema for this model.\nCheck the [model page](https://runware.ai/models/' + model.id + ') or use `includeCost: true` in your API call to see the exact cost per request.',
+        value: `Pricing details are not available in the schema for this model.\nCheck the [model page](https://runware.ai/models/${model.id}) or use \`includeCost: true\` in your API call to see the exact cost per request.`,
         inline: false,
       });
     } else {
       if (pricing.overview) {
-        embed.addFields({
-          name: '💲 Pricing Overview',
-          value: `**${pricing.overview}**`,
-          inline: false,
-        });
+        embed.addFields({ name: '💲 Pricing Overview', value: `**${pricing.overview}**`, inline: false });
       }
-
       if (pricing.examples?.length) {
-        const rows = pricing.examples
-          .map(ex => `\`${ex.configuration}\` → **${ex.price}**`)
-          .join('\n');
-
         embed.addFields({
           name: '📊 Example Costs',
-          value: rows.slice(0, 1020),
+          value: pricing.examples.map(ex => `\`${ex.configuration}\` → **${ex.price}**`).join('\n').slice(0, 1020),
           inline: false,
         });
       }
-
       embed.addFields({
         name: '💡 Tips',
         value: [
@@ -96,7 +96,6 @@ module.exports = {
     }
 
     embed.setFooter({ text: 'Prices are estimates and may vary · runware.ai/docs/platform/pricing' });
-
     await interaction.editReply({ embeds: [embed] });
   },
 };

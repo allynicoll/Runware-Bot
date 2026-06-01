@@ -5,30 +5,52 @@ const { Client, GatewayIntentBits, Collection, REST, Routes } = require('discord
 const { getModels } = require('./modelCache');
 
 // Load commands
-const searchCmd = require('./commands/search');
-const infoCmd = require('./commands/info');
-const buildCmd = require('./commands/build');
+const searchCmd    = require('./commands/search');
+const infoCmd      = require('./commands/info');
+const buildCmd     = require('./commands/build');
 const recommendCmd = require('./commands/recommend');
-const newCmd = require('./commands/new');
+const newCmd       = require('./commands/new');
 const changelogCmd = require('./commands/changelog');
-const pricingCmd = require('./commands/pricing');
-const compareCmd = require('./commands/compare');
+const pricingCmd   = require('./commands/pricing');
+const compareCmd   = require('./commands/compare');
 const { startNewModelWatcher } = require('./commands/new');
 
 const commands = new Collection();
-commands.set(searchCmd.data.name, searchCmd);
-commands.set(infoCmd.data.name, infoCmd);
-commands.set(buildCmd.data.name, buildCmd);
+commands.set(searchCmd.data.name,    searchCmd);
+commands.set(infoCmd.data.name,      infoCmd);
+commands.set(buildCmd.data.name,     buildCmd);
 commands.set(recommendCmd.data.name, recommendCmd);
-commands.set(newCmd.data.name, newCmd);
+commands.set(newCmd.data.name,       newCmd);
 commands.set(changelogCmd.data.name, changelogCmd);
-commands.set(pricingCmd.data.name, pricingCmd);
-commands.set(compareCmd.data.name, compareCmd);
+commands.set(pricingCmd.data.name,   pricingCmd);
+commands.set(compareCmd.data.name,   compareCmd);
 
-// ── Register slash commands with Discord ─────────────────────────────────────
+// Commands that consume paid Runware inference credits.
+// These are gated behind AI_COMMAND_ROLE_ID when that env var is set.
+const AI_COMMANDS = new Set(['build', 'recommend', 'compare']);
+const AI_COMMAND_ROLE_ID = process.env.AI_COMMAND_ROLE_ID || null;
+
+// ── Global error handlers ─────────────────────────────────────────────────────
+// Catches async errors that escape try/catch blocks so they don't silently
+// swallow or crash the process unexpectedly.
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Fatal] Unhandled promise rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[Fatal] Uncaught exception:', err);
+  process.exit(1);
+});
+
+// ── Register slash commands with Discord ──────────────────────────────────────
+
 async function registerCommands() {
   const rest = new REST().setToken(process.env.DISCORD_TOKEN);
-  const commandData = [searchCmd, infoCmd, buildCmd, recommendCmd, newCmd, changelogCmd, pricingCmd, compareCmd].map(c => c.data.toJSON());
+  const commandData = [
+    searchCmd, infoCmd, buildCmd, recommendCmd,
+    newCmd, changelogCmd, pricingCmd, compareCmd,
+  ].map(c => c.data.toJSON());
 
   console.log('[Commands] Registering slash commands to guild...');
   await rest.put(
@@ -38,12 +60,19 @@ async function registerCommands() {
   console.log('[Commands] Slash commands registered!');
 }
 
-// ── Create Discord client ────────────────────────────────────────────────────
+// ── Create Discord client ─────────────────────────────────────────────────────
+
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once('ready', async () => {
   console.log(`\n✅ Logged in as ${client.user.tag}`);
   console.log(`   Serving guild: ${process.env.DISCORD_GUILD_ID}`);
+
+  if (AI_COMMAND_ROLE_ID) {
+    console.log(`   AI commands restricted to role ID: ${AI_COMMAND_ROLE_ID}`);
+  } else {
+    console.log('   AI commands: open to all members (set AI_COMMAND_ROLE_ID to restrict)');
+  }
 
   try {
     const models = await getModels();
@@ -56,7 +85,6 @@ client.once('ready', async () => {
     startNewModelWatcher(client, process.env.ANNOUNCE_CHANNEL_ID);
   } else {
     console.log('[Watcher] No ANNOUNCE_CHANNEL_ID set — automatic announcements disabled.');
-    console.log('          Add it to .env to enable automatic new model posts.');
   }
 });
 
@@ -66,11 +94,27 @@ client.on('interactionCreate', async interaction => {
   const command = commands.get(interaction.commandName);
   if (!command) return;
 
+  // Audit log — one line per invocation for debugging and abuse tracking
+  console.log(
+    `[Cmd] /${interaction.commandName} | ${interaction.user.tag} (${interaction.user.id}) | guild: ${interaction.guildId}`
+  );
+
+  // Role-based access control for paid AI commands
+  if (AI_COMMAND_ROLE_ID && AI_COMMANDS.has(interaction.commandName)) {
+    const hasRole = interaction.member?.roles?.cache?.has(AI_COMMAND_ROLE_ID);
+    if (!hasRole) {
+      return interaction.reply({
+        content: '❌ You don\'t have permission to use this command.',
+        ephemeral: true,
+      });
+    }
+  }
+
   try {
     await command.execute(interaction);
   } catch (error) {
     console.error(`[Error] Command /${interaction.commandName}:`, error);
-    const msg = { content: '❌ Something went wrong running that command. Check the bot console for details.', ephemeral: true };
+    const msg = { content: '❌ Something went wrong. Please try again.', ephemeral: true };
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply(msg).catch(() => {});
     } else {
@@ -79,10 +123,11 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-// ── Start ────────────────────────────────────────────────────────────────────
+// ── Start ─────────────────────────────────────────────────────────────────────
+
 (async () => {
   const required = ['DISCORD_TOKEN', 'DISCORD_CLIENT_ID', 'DISCORD_GUILD_ID', 'RUNWARE_API_KEY'];
-  const missing = required.filter(k => !process.env[k]);
+  const missing  = required.filter(k => !process.env[k]);
   if (missing.length) {
     console.error(`❌ Missing required environment variables: ${missing.join(', ')}`);
     console.error('   Copy .env.example to .env and fill in the values.');

@@ -3,17 +3,23 @@
 // Also exports startNewModelWatcher() for automatic channel announcements
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getModels } = require('../modelCache');
-const fs = require('fs');
+const { getModels }     = require('../modelCache');
+const { checkCooldown } = require('../rateLimiter');
+const fs   = require('fs');
 const path = require('path');
 
 const SNAPSHOT_FILE = path.join(__dirname, '..', '.model-snapshot.json');
 
-// Load snapshot from disk (survives bot restarts)
 function loadSnapshot() {
   try {
     if (fs.existsSync(SNAPSHOT_FILE)) {
-      return JSON.parse(fs.readFileSync(SNAPSHOT_FILE, 'utf8'));
+      const raw = JSON.parse(fs.readFileSync(SNAPSHOT_FILE, 'utf8'));
+      // Validate shape: must be a plain object (id -> status strings)
+      if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+        console.warn('[Watcher] Snapshot has unexpected shape — discarding');
+        return null;
+      }
+      return raw;
     }
   } catch (e) {
     console.warn('[Watcher] Could not load snapshot:', e.message);
@@ -21,7 +27,6 @@ function loadSnapshot() {
   return null;
 }
 
-// Save snapshot to disk
 function saveSnapshot(models) {
   try {
     const snap = {};
@@ -48,7 +53,6 @@ function diffModels(oldSnap, newModels) {
       wentLive.push(m);
     }
   }
-
   return { brandNew, wentLive };
 }
 
@@ -62,20 +66,12 @@ function buildEmbeds(brandNew, wentLive) {
       .setTitle(`🆕 ${brandNew.length} New Model${brandNew.length > 1 ? 's' : ''} Added`)
       .setFooter({ text: '🟢 Live  🔵 API Only  🟡 Coming Soon  🔴 Deprecated  ⚪ Unknown' })
       .setTimestamp();
-
     const lines = brandNew.map(m => {
       const emoji = statusEmoji[m.status] || '⚪';
-      const caps = m.capabilities?.join(', ') || '';
-      return emoji + ' **' + m.name + '** `' + m.id + '`\n> ' + caps;
+      return emoji + ' **' + m.name + '** `' + m.id + '`\n> ' + (m.capabilities?.join(', ') || '');
     });
-
-    // Split into fields of 5 to stay under Discord's char limits
     for (let i = 0; i < lines.length; i += 5) {
-      embed.addFields({
-        name: i === 0 ? 'Models' : '​',
-        value: lines.slice(i, i + 5).join('\n\n'),
-        inline: false
-      });
+      embed.addFields({ name: i === 0 ? 'Models' : '​', value: lines.slice(i, i + 5).join('\n\n'), inline: false });
     }
     embeds.push(embed);
   }
@@ -86,19 +82,12 @@ function buildEmbeds(brandNew, wentLive) {
       .setTitle(`✅ ${wentLive.length} Model${wentLive.length > 1 ? 's' : ''} Now Live`)
       .setFooter({ text: '🟢 Live  🔵 API Only  🟡 Coming Soon  🔴 Deprecated  ⚪ Unknown' })
       .setTimestamp();
-
     const lines = wentLive.map(m => {
       const emoji = statusEmoji[m.status] || '⚪';
-      const caps = m.capabilities?.join(', ') || '';
-      return emoji + ' **' + m.name + '** `' + m.id + '`\n> ' + caps;
+      return emoji + ' **' + m.name + '** `' + m.id + '`\n> ' + (m.capabilities?.join(', ') || '');
     });
-
     for (let i = 0; i < lines.length; i += 5) {
-      embed.addFields({
-        name: i === 0 ? 'Models' : '​',
-        value: lines.slice(i, i + 5).join('\n\n'),
-        inline: false
-      });
+      embed.addFields({ name: i === 0 ? 'Models' : '​', value: lines.slice(i, i + 5).join('\n\n'), inline: false });
     }
     embeds.push(embed);
   }
@@ -106,49 +95,41 @@ function buildEmbeds(brandNew, wentLive) {
   return embeds;
 }
 
-// Called from index.js to start the background watcher
 function startNewModelWatcher(client, channelId, intervalMs = 60 * 60 * 1000) {
   console.log(`[Watcher] Starting — checking every ${intervalMs / 60000}min, posting to channel ${channelId}`);
 
-  // Seed the initial snapshot on startup (don't post anything yet)
   getModels().then(models => {
     const existing = loadSnapshot();
     if (!existing) {
       saveSnapshot(models);
-      console.log(`[Watcher] First run — snapshot saved (${models.length} models). Will detect new ones from next check.`);
+      console.log(`[Watcher] First run — snapshot saved (${models.length} models).`);
     } else {
-      console.log(`[Watcher] Snapshot loaded from disk (${Object.keys(existing).length} models tracked).`);
+      console.log(`[Watcher] Snapshot loaded (${Object.keys(existing).length} models tracked).`);
     }
   }).catch(e => console.error('[Watcher] Startup failed:', e.message));
 
   setInterval(async () => {
     try {
-      const models = await getModels();
+      const models  = await getModels();
       const oldSnap = loadSnapshot();
       if (!oldSnap) { saveSnapshot(models); return; }
 
       const { brandNew, wentLive } = diffModels(oldSnap, models);
-      saveSnapshot(models); // always update snapshot after diffing
-
+      saveSnapshot(models);
       if (!brandNew.length && !wentLive.length) return;
 
       const channel = await client.channels.fetch(channelId).catch(() => null);
-      if (!channel) {
-        console.warn('[Watcher] Announcement channel not found:', channelId);
-        return;
-      }
+      if (!channel) { console.warn('[Watcher] Announcement channel not found:', channelId); return; }
 
       for (const embed of buildEmbeds(brandNew, wentLive)) {
         await channel.send({ embeds: [embed] });
       }
-
     } catch (e) {
       console.error('[Watcher] Check failed:', e.message);
     }
   }, intervalMs);
 }
 
-// /new slash command — shows models added since last snapshot
 module.exports = {
   startNewModelWatcher,
 
@@ -157,12 +138,19 @@ module.exports = {
     .setDescription('Show models added or gone live since the bot last checked'),
 
   async execute(interaction) {
+    const wait = checkCooldown(interaction.user.id, 'new');
+    if (wait) {
+      return interaction.reply({
+        content: `⏱️ Please wait **${wait}s** before using \`/new\` again.`,
+        ephemeral: true,
+      });
+    }
+
     await interaction.deferReply();
 
-    const models = await getModels();
+    const models  = await getModels();
     const oldSnap = loadSnapshot();
 
-    // No snapshot yet — save one and explain
     if (!oldSnap) {
       saveSnapshot(models);
       return interaction.editReply(
@@ -173,7 +161,7 @@ module.exports = {
     const { brandNew, wentLive } = diffModels(oldSnap, models);
 
     if (!brandNew.length && !wentLive.length) {
-      return interaction.editReply("✅ No new models or status changes since the last check. Check back later!");
+      return interaction.editReply('✅ No new models or status changes since the last check. Check back later!');
     }
 
     const embeds = buildEmbeds(brandNew, wentLive);
@@ -181,5 +169,5 @@ module.exports = {
     for (const embed of embeds.slice(1)) {
       await interaction.followUp({ embeds: [embed] });
     }
-  }
+  },
 };
